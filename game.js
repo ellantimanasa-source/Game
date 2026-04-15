@@ -77,17 +77,7 @@ function renderLeaderboard(items, message = "") {
 }
 
 function pinLeaderboardTopRight() {
-  if (!leaderboardList) return;
-  const panel = document.getElementById("leaderboard");
-  if (!panel) return;
-  panel.style.top = "50px";
-  panel.style.right = "14px";
-  panel.style.left = "auto";
-  panel.style.bottom = "auto";
-  if (window.innerWidth <= 700) {
-    panel.style.top = "48px";
-    panel.style.right = "10px";
-  }
+  // Keep function to avoid touching call sites; CSS controls layout.
 }
 
 async function initLeaderboard() {
@@ -1151,7 +1141,5 @@ resizeCanvas();
 state.clouds = createClouds();
 setupControls();
 window.addEventListener("resize", resizeCanvas);
-window.addEventListener("resize", pinLeaderboardTopRight);
-pinLeaderboardTopRight();
 initLeaderboard();
 requestAnimationFrame(gameLoop);
