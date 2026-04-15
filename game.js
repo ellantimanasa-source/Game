@@ -76,6 +76,20 @@ function renderLeaderboard(items, message = "") {
     .join("");
 }
 
+function pinLeaderboardTopRight() {
+  if (!leaderboardList) return;
+  const panel = document.getElementById("leaderboard");
+  if (!panel) return;
+  panel.style.top = "50px";
+  panel.style.right = "14px";
+  panel.style.left = "auto";
+  panel.style.bottom = "auto";
+  if (window.innerWidth <= 700) {
+    panel.style.top = "48px";
+    panel.style.right = "10px";
+  }
+}
+
 async function initLeaderboard() {
   if (!hasFirebaseConfig()) {
     renderLeaderboard([], "Add Firebase config");
@@ -1137,5 +1151,7 @@ resizeCanvas();
 state.clouds = createClouds();
 setupControls();
 window.addEventListener("resize", resizeCanvas);
+window.addEventListener("resize", pinLeaderboardTopRight);
+pinLeaderboardTopRight();
 initLeaderboard();
 requestAnimationFrame(gameLoop);
