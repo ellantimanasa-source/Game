@@ -1,5 +1,6 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
+const leaderboardList = document.getElementById("leaderboardList");
 
 let GROUND_Y = 0;
 const BACKDROP_ROAD_GAP = 42;
@@ -14,6 +15,7 @@ const state = {
   boneSpawnTimer: 0,
   superFlagSpawnTimer: 0,
   flyTimer: 0,
+  scoreSubmitted: false,
   time: 0,
   obstacles: [],
   bones: [],
@@ -32,6 +34,89 @@ const dog = {
   onGround: true,
   legPhase: 0
 };
+
+// Paste your Firebase project config here to enable global leaderboard.
+// You can find it in Firebase Console -> Project settings -> Your apps -> SDK setup and configuration.
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCduewTnt04yxqYn3nYnpD68lUvNYPTQPA",
+  authDomain: "game-95425.firebaseapp.com",
+  projectId: "game-95425",
+  storageBucket: "game-95425.firebasestorage.app",
+  messagingSenderId: "366606072020",
+  appId: "1:366606072020:web:df4d17c31e8aee81dd2341"
+};
+
+let leaderboardDb = null;
+let playerName = localStorage.getItem("yaleRunnerPlayerName") || "";
+
+if (!playerName) {
+  const entered = window.prompt("Enter your name for the global leaderboard (max 12 chars):", "");
+  playerName = (entered || "Guest").trim().slice(0, 12) || "Guest";
+  localStorage.setItem("yaleRunnerPlayerName", playerName);
+}
+
+function hasFirebaseConfig() {
+  return Boolean(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.projectId && window.firebase);
+}
+
+function renderLeaderboard(items, message = "") {
+  if (!leaderboardList) return;
+  if (message) {
+    leaderboardList.innerHTML = `<li>${message}</li>`;
+    return;
+  }
+  if (!items.length) {
+    leaderboardList.innerHTML = "<li>No scores yet</li>";
+    return;
+  }
+  leaderboardList.innerHTML = items
+    .slice(0, 5)
+    .map((item, index) => `<li>#${index + 1} ${item.name} - ${item.score}</li>`)
+    .join("");
+}
+
+async function initLeaderboard() {
+  if (!hasFirebaseConfig()) {
+    renderLeaderboard([], "Add Firebase config");
+    return;
+  }
+  try {
+    const app = firebase.apps.length ? firebase.app() : firebase.initializeApp(FIREBASE_CONFIG);
+    leaderboardDb = app.firestore();
+    await loadTopScores();
+  } catch (error) {
+    renderLeaderboard([], "Leaderboard unavailable");
+  }
+}
+
+async function loadTopScores() {
+  if (!leaderboardDb) return;
+  try {
+    const snapshot = await leaderboardDb
+      .collection("scores")
+      .orderBy("score", "desc")
+      .limit(5)
+      .get();
+    const items = snapshot.docs.map((doc) => doc.data());
+    renderLeaderboard(items);
+  } catch (error) {
+    renderLeaderboard([], "Read failed");
+  }
+}
+
+async function submitScore(score) {
+  if (!leaderboardDb) return;
+  try {
+    await leaderboardDb.collection("scores").add({
+      name: playerName || "Guest",
+      score: Math.floor(score),
+      createdAt: Date.now()
+    });
+    await loadTopScores();
+  } catch (error) {
+    // Keep gameplay smooth even if submit fails.
+  }
+}
 
 function resizeCanvas() {
   canvas.width = window.innerWidth;
@@ -54,6 +139,7 @@ function resetGame() {
   state.boneSpawnTimer = 1.2;
   state.superFlagSpawnTimer = 8 + Math.random() * 5;
   state.flyTimer = 0;
+  state.scoreSubmitted = false;
   state.time = 0;
   state.obstacles = [];
   state.bones = [];
@@ -306,6 +392,10 @@ function update(dt) {
     if (hit) {
       state.gameOver = true;
       state.highScore = Math.max(state.highScore, Math.floor(state.score));
+      if (!state.scoreSubmitted) {
+        state.scoreSubmitted = true;
+        submitScore(state.score);
+      }
       break;
     }
   }
@@ -1027,4 +1117,5 @@ resizeCanvas();
 state.clouds = createClouds();
 setupControls();
 window.addEventListener("resize", resizeCanvas);
+initLeaderboard();
 requestAnimationFrame(gameLoop);

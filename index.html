@@ -9,7 +9,15 @@
 <body>
   <main class="game-shell">
     <canvas id="gameCanvas" aria-label="Poodle runner game"></canvas>
+    <aside id="leaderboard" aria-label="Global leaderboard">
+      <h2>Top 5</h2>
+      <ol id="leaderboardList">
+        <li>Loading...</li>
+      </ol>
+    </aside>
   </main>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
   <script src="game.js"></script>
 </body>
 </html>

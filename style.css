@@ -56,3 +56,35 @@ kbd {
   height: 100vh;
   background: #f5fbff;
 }
+
+#leaderboard {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  width: 190px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(53, 82, 114, 0.3);
+  border-radius: 10px;
+  box-shadow: 0 6px 16px rgba(18, 36, 59, 0.12);
+  z-index: 5;
+  color: #1f2f47;
+}
+
+#leaderboard h2 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+}
+
+#leaderboardList {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+#leaderboardList li {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
