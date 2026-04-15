@@ -15,7 +15,10 @@ const state = {
   boneSpawnTimer: 0,
   superFlagSpawnTimer: 0,
   flyTimer: 0,
+  flyCoinRowTimer: 0,
+  flyPowerMode: "none",
   graceTimer: 0,
+  pendingLandingGrace: false,
   scoreSubmitted: false,
   time: 0,
   obstacles: [],
@@ -144,7 +147,10 @@ function resetGame() {
   state.boneSpawnTimer = 1.2;
   state.superFlagSpawnTimer = 8 + Math.random() * 5;
   state.flyTimer = 0;
+  state.flyCoinRowTimer = 0;
+  state.flyPowerMode = "none";
   state.graceTimer = 0;
+  state.pendingLandingGrace = false;
   state.scoreSubmitted = false;
   state.time = 0;
   state.obstacles = [];
@@ -243,13 +249,17 @@ function spawnObstacle() {
   });
 }
 
-function spawnBone() {
-  const isFlying = state.flyTimer > 0;
-  const minY = isFlying ? 48 : GROUND_Y - 112;
-  const maxY = isFlying ? GROUND_Y - 110 : GROUND_Y - 10;
+function spawnBone(highAltitude = false) {
+  const isFlyingHigh = highAltitude;
+  const minY = GROUND_Y - 112;
+  const maxY = GROUND_Y - 10;
+  const highMinY = 48;
+  const highMaxY = GROUND_Y - 110;
   state.bones.push({
     x: canvas.width + 40,
-    y: minY + Math.random() * (maxY - minY),
+    y: isFlyingHigh
+      ? highMinY + Math.random() * (highMaxY - highMinY)
+      : minY + Math.random() * (maxY - minY),
     width: 26,
     height: 26,
     collected: false,
@@ -257,20 +267,46 @@ function spawnBone() {
   });
 }
 
+function spawnFlyCoinRows() {
+  const rows = 4;
+  const cols = 8;
+  const rowGap = 22;
+  const colGap = 42;
+  const startX = canvas.width + 18;
+  const startY = 96;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const waveOffset = Math.sin((c / (cols - 1)) * Math.PI * 2 + r * 0.9) * 18;
+      state.bones.push({
+        x: startX + c * colGap,
+        y: startY + r * rowGap + waveOffset,
+        width: 24,
+        height: 24,
+        collected: false,
+        spinOffset: Math.random() * Math.PI * 2
+      });
+    }
+  }
+}
+
 function spawnSuperFlag() {
   const minY = GROUND_Y - 170;
   const maxY = GROUND_Y - 90;
+  const kind = Math.random() < 0.5 ? "flag" : "bottle";
   state.superFlags.push({
     x: canvas.width + 50,
     y: minY + Math.random() * (maxY - minY),
     width: 46,
     height: 34,
+    kind,
     collected: false
   });
 }
 
 function update(dt) {
   if (!state.running || state.gameOver) return;
+  const wasOnGround = dog.onGround;
+  let flyEndedThisFrame = false;
 
   state.time += dt;
   state.score += dt * 11;
@@ -280,7 +316,8 @@ function update(dt) {
     state.flyTimer -= dt;
     if (state.flyTimer <= 0) {
       state.flyTimer = 0;
-      state.graceTimer = Math.max(state.graceTimer, 3);
+      state.flyPowerMode = "none";
+      flyEndedThisFrame = true;
     }
     dog.vy += 920 * dt;
     if (dog.y > GROUND_Y - 130) {
@@ -304,6 +341,13 @@ function update(dt) {
     dog.vy = 0;
     dog.onGround = true;
   }
+  if (flyEndedThisFrame && dog.onGround && state.pendingLandingGrace) {
+    state.graceTimer = Math.max(state.graceTimer, 3);
+    state.pendingLandingGrace = false;
+  } else if (!wasOnGround && dog.onGround && state.pendingLandingGrace) {
+    state.graceTimer = Math.max(state.graceTimer, 3);
+    state.pendingLandingGrace = false;
+  }
 
   dog.legPhase += dt * 18;
 
@@ -317,17 +361,31 @@ function update(dt) {
     state.spawnTimer = Math.max(0.52, state.spawnTimer);
   }
 
-  state.boneSpawnTimer -= dt;
-  if (state.boneSpawnTimer <= 0) {
-    spawnBone();
-    const isFlying = state.flyTimer > 0;
-    const min = isFlying ? 0.35 : 1.8;
-    const max = isFlying ? 0.85 : 3.7;
-    state.boneSpawnTimer = min + Math.random() * (max - min);
-
-    // During fly mode, occasionally spawn a second coin near high altitude.
-    if (isFlying && Math.random() < 0.55) {
+  if (state.flyTimer > 0) {
+    if (state.flyPowerMode === "stanley") {
+      state.flyCoinRowTimer -= dt;
+      if (state.flyCoinRowTimer <= 0) {
+        spawnFlyCoinRows();
+        state.flyCoinRowTimer = 0.75;
+      }
+    } else {
+      // Original YALE flag power: frequent high-altitude coins.
+      state.boneSpawnTimer -= dt;
+      if (state.boneSpawnTimer <= 0) {
+        spawnBone(true);
+        if (Math.random() < 0.55) {
+          spawnBone(true);
+        }
+        state.boneSpawnTimer = 0.35 + Math.random() * 0.5;
+      }
+    }
+  } else {
+    state.boneSpawnTimer -= dt;
+    if (state.boneSpawnTimer <= 0) {
       spawnBone();
+      const min = 1.8;
+      const max = 3.7;
+      state.boneSpawnTimer = min + Math.random() * (max - min);
     }
   }
 
@@ -438,17 +496,27 @@ function update(dt) {
       flag.collected = true;
       state.score += 120;
       state.flyTimer = 5;
+      state.flyCoinRowTimer = 0;
       state.graceTimer = 0;
+      state.pendingLandingGrace = true;
       dog.vy = -430;
       dog.onGround = false;
 
-      // Immediate reward burst at fly activation.
-      spawnBone();
-      spawnBone();
-      if (Math.random() < 0.7) {
-        spawnBone();
+      if (flag.kind === "flag") {
+        // Keep original flag power behavior.
+        state.flyPowerMode = "flag";
+        spawnBone(true);
+        spawnBone(true);
+        if (Math.random() < 0.7) {
+          spawnBone(true);
+        }
+        state.boneSpawnTimer = 0.25;
+      } else {
+        // Stanley bottle power: 4-row top coin waves.
+        state.flyPowerMode = "stanley";
+        spawnFlyCoinRows();
+        state.boneSpawnTimer = 1.2;
       }
-      state.boneSpawnTimer = 0.25;
     }
   }
 }
@@ -931,26 +999,39 @@ function drawSuperFlags() {
     const x = flag.x;
     const y = flag.y + Math.sin(state.time * 5 + x * 0.03) * 1.2;
 
-    // Pole
-    ctx.fillStyle = "#c8a164";
-    roundRect(x + 4, y + 2, 3, 30, 1, true);
+    if (flag.kind === "flag") {
+      // YALE flag collectible.
+      ctx.fillStyle = "#c8a164";
+      roundRect(x + 4, y + 2, 3, 30, 1, true);
+      ctx.fillStyle = "#1d3f99";
+      ctx.beginPath();
+      ctx.moveTo(x + 7, y + 4);
+      ctx.lineTo(x + 40, y + 8);
+      ctx.lineTo(x + 30, y + 17);
+      ctx.lineTo(x + 40, y + 25);
+      ctx.lineTo(x + 7, y + 30);
+      ctx.closePath();
+      ctx.fill();
 
-    // Blue flag
-    ctx.fillStyle = "#1d3f99";
-    ctx.beginPath();
-    ctx.moveTo(x + 7, y + 4);
-    ctx.lineTo(x + 40, y + 8);
-    ctx.lineTo(x + 30, y + 17);
-    ctx.lineTo(x + 40, y + 25);
-    ctx.lineTo(x + 7, y + 30);
-    ctx.closePath();
-    ctx.fill();
+      ctx.fillStyle = "#f4f7ff";
+      roundRect(x + 18, y + 12, 3, 4, 1, true);
+      roundRect(x + 23, y + 12, 3, 4, 1, true);
+      roundRect(x + 20.5, y + 15.5, 3, 7, 1, true);
+    } else {
+      // YALE Stanley bottle collectible.
+      ctx.fillStyle = "#d0d8e4";
+      roundRect(x + 17, y + 4, 10, 5, 2, true); // lid
+      ctx.fillStyle = "#1d3f99";
+      roundRect(x + 12, y + 8, 20, 24, 6, true); // bottle body
 
-    // White Y on flag
-    ctx.fillStyle = "#f4f7ff";
-    roundRect(x + 18, y + 12, 3, 4, 1, true);
-    roundRect(x + 23, y + 12, 3, 4, 1, true);
-    roundRect(x + 20.5, y + 15.5, 3, 7, 1, true);
+      ctx.fillStyle = "#365cbe";
+      roundRect(x + 25, y + 10, 4, 20, 2, true);
+
+      ctx.fillStyle = "#f4f7ff";
+      roundRect(x + 16, y + 13, 3.2, 4, 1, true);
+      roundRect(x + 21.8, y + 13, 3.2, 4, 1, true);
+      roundRect(x + 19.2, y + 16.5, 3.3, 9, 1, true);
+    }
 
   }
 }
