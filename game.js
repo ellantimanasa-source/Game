@@ -15,6 +15,7 @@ const state = {
   boneSpawnTimer: 0,
   superFlagSpawnTimer: 0,
   flyTimer: 0,
+  graceTimer: 0,
   scoreSubmitted: false,
   time: 0,
   obstacles: [],
@@ -139,6 +140,7 @@ function resetGame() {
   state.boneSpawnTimer = 1.2;
   state.superFlagSpawnTimer = 8 + Math.random() * 5;
   state.flyTimer = 0;
+  state.graceTimer = 0;
   state.scoreSubmitted = false;
   state.time = 0;
   state.obstacles = [];
@@ -272,6 +274,10 @@ function update(dt) {
 
   if (state.flyTimer > 0) {
     state.flyTimer -= dt;
+    if (state.flyTimer <= 0) {
+      state.flyTimer = 0;
+      state.graceTimer = Math.max(state.graceTimer, 3);
+    }
     dog.vy += 920 * dt;
     if (dog.y > GROUND_Y - 130) {
       dog.vy -= 1500 * dt;
@@ -282,6 +288,10 @@ function update(dt) {
     }
   } else {
     dog.vy += dog.gravity * dt;
+  }
+  if (state.graceTimer > 0) {
+    state.graceTimer -= dt;
+    if (state.graceTimer < 0) state.graceTimer = 0;
   }
   dog.y += dog.vy * dt;
 
@@ -390,13 +400,15 @@ function update(dt) {
     }
 
     if (hit) {
-      state.gameOver = true;
-      state.highScore = Math.max(state.highScore, Math.floor(state.score));
-      if (!state.scoreSubmitted) {
-        state.scoreSubmitted = true;
-        submitScore(state.score);
+      if (state.graceTimer <= 0 && state.flyTimer <= 0) {
+        state.gameOver = true;
+        state.highScore = Math.max(state.highScore, Math.floor(state.score));
+        if (!state.scoreSubmitted) {
+          state.scoreSubmitted = true;
+          submitScore(state.score);
+        }
+        break;
       }
-      break;
     }
   }
 
@@ -422,6 +434,7 @@ function update(dt) {
       flag.collected = true;
       state.score += 120;
       state.flyTimer = 5;
+      state.graceTimer = 0;
       dog.vy = -430;
       dog.onGround = false;
 
@@ -1060,7 +1073,7 @@ function drawUI() {
     ctx.textAlign = "center";
     ctx.fillStyle = "#1f2f47";
     ctx.font = "bold 38px Arial";
-    ctx.fillText("Handsome Dan Run", canvas.width / 2, 130);
+    ctx.fillText("FlappyDan", canvas.width / 2, 130);
     ctx.font = "20px Arial";
     ctx.fillText("Press Space / Arrow Up or tap to start", canvas.width / 2, 170);
   }
@@ -1079,6 +1092,13 @@ function drawUI() {
     ctx.fillStyle = "#1d3f99";
     ctx.font = "bold 20px Arial";
     ctx.fillText(`FLY ${state.flyTimer.toFixed(1)}s`, 20, 34);
+  }
+
+  if (state.graceTimer > 0 && !state.gameOver) {
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#2f7a43";
+    ctx.font = "bold 18px Arial";
+    ctx.fillText(`SAFE ${state.graceTimer.toFixed(1)}s`, 20, 58);
   }
 }
 

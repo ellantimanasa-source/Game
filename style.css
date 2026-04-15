@@ -59,7 +59,8 @@ kbd {
 
 #leaderboard {
   position: absolute;
-  top: 14px;
+  top: auto;
+  bottom: 14px;
   left: 14px;
   width: 190px;
   padding: 10px 12px;
@@ -87,4 +88,22 @@ kbd {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+@media (max-width: 700px) {
+  #leaderboard {
+    width: 160px;
+    padding: 8px 10px;
+    bottom: 10px;
+    left: 10px;
+  }
+
+  #leaderboard h2 {
+    font-size: 0.88rem;
+  }
+
+  #leaderboardList {
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
 }
