@@ -59,9 +59,10 @@ kbd {
 
 #leaderboard {
   position: absolute;
-  top: auto;
-  bottom: 14px;
-  left: 14px;
+  top: 14px;
+  bottom: auto;
+  left: auto;
+  right: 14px;
   width: 190px;
   padding: 10px 12px;
   background: rgba(255, 255, 255, 0.88);
@@ -94,8 +95,10 @@ kbd {
   #leaderboard {
     width: 160px;
     padding: 8px 10px;
-    bottom: 10px;
-    left: 10px;
+    top: 10px;
+    bottom: auto;
+    left: auto;
+    right: 10px;
   }
 
   #leaderboard h2 {

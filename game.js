@@ -1072,10 +1072,10 @@ function drawUI() {
   if (!state.running) {
     ctx.textAlign = "center";
     ctx.fillStyle = "#1f2f47";
-    ctx.font = "bold 38px Arial";
-    ctx.fillText("FlappyDan", canvas.width / 2, 130);
+    ctx.font = "bold 48px Arial";
+    ctx.fillText("FlappyDan", canvas.width / 2, canvas.height * 0.34);
     ctx.font = "20px Arial";
-    ctx.fillText("Press Space / Arrow Up or tap to start", canvas.width / 2, 170);
+    ctx.fillText("Press Space / Arrow Up or tap to start", canvas.width / 2, canvas.height * 0.34 + 42);
   }
 
   if (state.gameOver) {
