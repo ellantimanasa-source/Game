@@ -159,8 +159,10 @@ function createSubmissionPayload(score) {
 
 // Supabase config for global leaderboard.
 // Fill these from Supabase dashboard -> Project Settings -> API.
+// IMPORTANT: Replace SUPABASE_ANON_KEY with the actual "anon public" key from your Supabase dashboard.
+// It should start with "eyJ" and be very long (JWT token format).
 const SUPABASE_URL = "https://sdaajuoywdbxwqfmvlqg.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_wTVyg4HZ4d9FhsZv-VdScw_-j1vy6Wb";
+const SUPABASE_ANON_KEY = "YOUR_ANON_KEY_HERE";
 
 let supabaseClient = null;
 let playerName = localStorage.getItem("yaleRunnerPlayerName") || "";
@@ -172,14 +174,11 @@ if (!playerName) {
 }
 
 function hasSupabaseConfig() {
-  return (
-    typeof SUPABASE_URL === "string" &&
-    SUPABASE_URL.startsWith("https://") &&
-    typeof SUPABASE_ANON_KEY === "string" &&
-    SUPABASE_ANON_KEY.length > 20 &&
-    window.supabase &&
-    typeof window.supabase.createClient === "function"
-  );
+  const hasUrl = typeof SUPABASE_URL === "string" && SUPABASE_URL.startsWith("https://");
+  const hasKey = typeof SUPABASE_ANON_KEY === "string" && SUPABASE_ANON_KEY.length > 20;
+  const hasLib = window.supabase && typeof window.supabase.createClient === "function";
+  console.log("[SUPABASE] Config check:", { hasUrl, hasKey, hasLib, keyPrefix: SUPABASE_ANON_KEY?.substring(0, 10) });
+  return hasUrl && hasKey && hasLib;
 }
 
 function renderLeaderboard(items, message = "") {
@@ -204,27 +203,36 @@ function pinLeaderboardTopRight() {
 
 async function initLeaderboard() {
   if (!hasSupabaseConfig()) {
+    console.error("[SUPABASE] Configuration incomplete");
     renderLeaderboard([], "Add Supabase config");
     return;
   }
   try {
+    console.log("[SUPABASE] Creating client...");
     supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: { persistSession: false }
     });
+    console.log("[SUPABASE] Client created successfully");
     await loadTopScores();
   } catch (error) {
+    console.error("[SUPABASE] Init error:", error);
     renderLeaderboard([], "Leaderboard unavailable");
   }
 }
 
 async function loadTopScores() {
-  if (!supabaseClient) return;
+  if (!supabaseClient) {
+    console.warn("[SUPABASE] loadTopScores called but no client");
+    return;
+  }
   try {
+    console.log("[SUPABASE] Fetching top scores...");
     const { data, error } = await supabaseClient
       .from("scores")
       .select("name,score")
       .order("score", { ascending: false })
       .limit(5);
+    console.log("[SUPABASE] Fetch result:", { data, error });
     if (error) throw error;
     const items = (data || []).map((item) => ({
       name: item.name || "Guest",
@@ -232,13 +240,22 @@ async function loadTopScores() {
     }));
     renderLeaderboard(items);
   } catch (error) {
+    console.error("[SUPABASE] Load scores error:", error);
     renderLeaderboard([], "Read failed");
   }
 }
 
 const submitLeaderboardScore = async (score, payload = null) => {
-  if (!supabaseClient) return;
-  if (!payload || typeof payload.proof !== "string") return;
+  if (!supabaseClient) {
+    console.error("[SUBMIT] No Supabase client initialized");
+    state.finishPositionStatus = "Submit failed: No database connection";
+    return;
+  }
+  if (!payload || typeof payload.proof !== "string") {
+    console.error("[SUBMIT] Invalid payload", payload);
+    state.finishPositionStatus = "Submit failed: Invalid payload";
+    return;
+  }
   try {
     const submission = {
       p_name: playerName || "Guest",
@@ -254,15 +271,23 @@ const submitLeaderboardScore = async (score, payload = null) => {
       p_session_id: state.sessionId,
       p_click_samples: payload.clickSamples,
       p_proof: payload.proof,
-      p_client_hash: payload.proof,
+      p_client_hash: payload.clientHash,
       p_telemetry_hash: payload.telemetryHash,
       p_submit_nonce_len: payload.submitNonceLen,
       p_integrity_version: 2
     };
 
+    console.log("[SUBMIT] Calling submit_score_with_rank RPC", { 
+      score: payload.score, 
+      name: playerName,
+      clientHash: payload.clientHash,
+      proof: payload.proof 
+    });
     const { data, error } = await supabaseClient.rpc("submit_score_with_rank", submission);
+    console.log("[SUBMIT] RPC response", { data, error });
     if (error) {
       const msg = typeof error.message === "string" ? error.message : "RPC error";
+      console.error("[SUBMIT] RPC error:", error);
       state.finishPositionStatus = `Submit failed: ${msg}`;
       return;
     }
@@ -272,15 +297,19 @@ const submitLeaderboardScore = async (score, payload = null) => {
         : Array.isArray(data) && data.length && Number.isFinite(data[0]?.rank)
           ? data[0].rank
           : null;
+    console.log("[SUBMIT] Parsed rank:", rank);
     if (Number.isFinite(rank) && rank > 0) {
       state.finishPosition = Math.floor(rank);
       state.finishPositionStatus = "";
+      console.log("[SUBMIT] Success! Rank:", state.finishPosition);
     } else {
       state.finishPositionStatus = "Rank unavailable";
+      console.warn("[SUBMIT] Rank unavailable, data was:", data);
     }
 
     // Fallback if RPC exists but returns null rank unexpectedly.
     if (!Number.isFinite(rank)) {
+      console.log("[SUBMIT] Attempting fallback direct insert");
       const { error: insertError } = await supabaseClient.from("scores").insert({
         name: playerName || "Guest",
         score: payload.score,
