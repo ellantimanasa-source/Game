@@ -1231,17 +1231,21 @@ function drawUI() {
   if (state.gameOver) {
     ctx.textAlign = "center";
     ctx.fillStyle = "#13263f";
-    ctx.font = "bold 44px Arial";
-    ctx.fillText("Game Over", canvas.width / 2, 130);
-    ctx.font = "20px Arial";
+    ctx.font = "bold 48px Arial";
+    const centerY = canvas.height * 0.5;
+    ctx.fillText("Game Over", canvas.width / 2, centerY - 34);
+    ctx.font = "bold 24px Arial";
     const posText = state.finishPosition ? `You finished #${state.finishPosition}` : "";
     if (posText || state.finishPositionStatus) {
       const flash = 0.35 + Math.abs(Math.sin(state.time * 10)) * 0.65;
       ctx.fillStyle = `rgba(210, 30, 45, ${flash})`;
-      ctx.fillText(posText || state.finishPositionStatus, canvas.width / 2, 168);
-      ctx.fillText("Press Space / Arrow Up or tap to restart", canvas.width / 2, 198);
+      ctx.fillText(posText || state.finishPositionStatus, canvas.width / 2, centerY);
+      ctx.fillStyle = "#13263f";
+      ctx.font = "bold 20px Arial";
+      ctx.fillText("Press Space / Arrow Up or tap to restart", canvas.width / 2, centerY + 34);
     } else {
-      ctx.fillText("Press Space / Arrow Up or tap to restart", canvas.width / 2, 170);
+      ctx.font = "bold 20px Arial";
+      ctx.fillText("Press Space / Arrow Up or tap to restart", canvas.width / 2, centerY + 24);
     }
   }
 
