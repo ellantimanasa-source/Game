@@ -14,9 +14,11 @@ const state = {
   spawnTimer: 0,
   boneSpawnTimer: 0,
   superFlagSpawnTimer: 0,
+  unicornSpawnTimer: 0,
   flyTimer: 0,
   flyCoinRowTimer: 0,
   flyPowerMode: "none",
+  shieldTimer: 0,
   graceTimer: 0,
   pendingLandingGrace: false,
   hypeBannerTimer: 0,
@@ -28,6 +30,7 @@ const state = {
   policeClears: 0,
   harvardClears: 0,
   superCollectibles: 0,
+  unicornsCollected: 0,
   flyTimeMs: 0,
   clickSamples: [],
   telemetryHash: 0,
@@ -42,6 +45,7 @@ const state = {
   obstacles: [],
   bones: [],
   superFlags: [],
+  unicorns: [],
   clouds: []
 };
 
@@ -357,9 +361,11 @@ function resetGame() {
   state.spawnTimer = 0;
   state.boneSpawnTimer = 1.2;
   state.superFlagSpawnTimer = 8 + Math.random() * 5;
+  state.unicornSpawnTimer = 15 + Math.random() * 10;
   state.flyTimer = 0;
   state.flyCoinRowTimer = 0;
   state.flyPowerMode = "none";
+  state.shieldTimer = 0;
   state.graceTimer = 0;
   state.pendingLandingGrace = false;
   state.hypeBannerTimer = 2.6;
@@ -371,6 +377,7 @@ function resetGame() {
   state.policeClears = 0;
   state.harvardClears = 0;
   state.superCollectibles = 0;
+  state.unicornsCollected = 0;
   state.flyTimeMs = 0;
   state.clickSamples = [];
   state.telemetryHash = mixHash(Date.now() >>> 0, Math.random() * 1e9);
@@ -385,6 +392,7 @@ function resetGame() {
   state.obstacles = [];
   state.bones = [];
   state.superFlags = [];
+  state.unicorns = [];
   state.clouds = createClouds();
   dog.y = getRoadYAtX(dog.x + dog.width * 0.5) - dog.height;
   dog.vy = 0;
@@ -548,6 +556,19 @@ function spawnSuperFlag() {
   });
 }
 
+function spawnUnicorn() {
+  const minY = GROUND_Y - 160;
+  const maxY = GROUND_Y - 100;
+  state.unicorns.push({
+    x: canvas.width + 50,
+    y: minY + Math.random() * (maxY - minY),
+    width: 50,
+    height: 45,
+    collected: false,
+    bounce: 0
+  });
+}
+
 function update(dt) {
   if (!state.running || state.gameOver) return;
   const wasOnGround = dog.onGround;
@@ -608,6 +629,11 @@ function update(dt) {
     }
   } else {
     dog.vy += dog.gravity * dt;
+  }
+
+  if (state.shieldTimer > 0) {
+    state.shieldTimer -= dt;
+    if (state.shieldTimer < 0) state.shieldTimer = 0;
   }
   if (state.graceTimer > 0) {
     state.graceTimer -= dt;
@@ -678,6 +704,14 @@ function update(dt) {
     state.superFlagSpawnTimer = min + Math.random() * (max - min);
   }
 
+  state.unicornSpawnTimer -= dt;
+  if (state.unicornSpawnTimer <= 0) {
+    spawnUnicorn();
+    const min = 20;
+    const max = 35;
+    state.unicornSpawnTimer = min + Math.random() * (max - min);
+  }
+
   for (const obstacle of state.obstacles) {
     obstacle.x -= state.speed * dt;
     obstacle.y = getRoadYAtX(obstacle.x + obstacle.width * 0.5) - obstacle.height;
@@ -709,6 +743,12 @@ function update(dt) {
     flag.x -= (state.speed - 20) * dt;
   }
   state.superFlags = state.superFlags.filter((flag) => flag.x + flag.width > -10 && !flag.collected);
+
+  for (const unicorn of state.unicorns) {
+    unicorn.x -= (state.speed - 15) * dt;
+    unicorn.bounce += dt * 3;
+  }
+  state.unicorns = state.unicorns.filter((unicorn) => unicorn.x + unicorn.width > -10 && !unicorn.collected);
 
   for (const cloud of state.clouds) {
     cloud.x -= cloud.speed * dt;
@@ -748,7 +788,7 @@ function update(dt) {
     }
 
     if (hit) {
-      if (state.graceTimer <= 0 && state.flyTimer <= 0) {
+      if (state.graceTimer <= 0 && state.flyTimer <= 0 && state.shieldTimer <= 0) {
         state.gameOver = true;
         state.highScore = Math.max(state.highScore, Math.floor(state.score));
         if (!state.scoreSubmitted) {
@@ -774,7 +814,9 @@ function update(dt) {
       dog.y + dog.height - 6 > bone.y;
     if (collected) {
       bone.collected = true;
-      state.score += 30;
+      // Golden dog bones worth 50 points when shield is active
+      const points = state.shieldTimer > 0 ? 50 : 30;
+      state.score += points;
       state.coinsCollected += 1;
       state.telemetryHash = mixHash(state.telemetryHash, 3000 + state.coinsCollected);
     }
@@ -813,6 +855,27 @@ function update(dt) {
         spawnFlyCoinRows();
         state.boneSpawnTimer = 1.2;
       }
+    }
+  }
+
+  for (const unicorn of state.unicorns) {
+    const collected =
+      dog.x + 4 < unicorn.x + unicorn.width &&
+      dog.x + dog.width - 4 > unicorn.x &&
+      dog.y + 4 < unicorn.y + unicorn.height &&
+      dog.y + dog.height - 4 > unicorn.y;
+    if (collected) {
+      unicorn.collected = true;
+      state.score += 150;
+      state.unicornsCollected += 1;
+      state.telemetryHash = mixHash(state.telemetryHash, 15000 + state.unicornsCollected);
+      state.shieldTimer = 10;
+      state.speed = Math.min(state.speed + 120, 500);
+      // Spawn extra golden dog bones
+      for (let i = 0; i < 5; i++) {
+        spawnBone(true);
+      }
+      state.boneSpawnTimer = 0.3;
     }
   }
 }
@@ -1163,6 +1226,42 @@ function drawDog() {
   const y = dog.y;
   const baseY = y - 11;
 
+  // Shield visual if active
+  if (state.shieldTimer > 0) {
+    const shieldPulse = Math.sin(state.time * 8) * 0.15 + 0.85;
+    const shieldRadius = 42;
+    const centerX = x + dog.width / 2;
+    const centerY = y + dog.height / 2;
+    
+    // Rainbow shield glow
+    const gradient = ctx.createRadialGradient(centerX, centerY, shieldRadius - 10, centerX, centerY, shieldRadius);
+    gradient.addColorStop(0, "rgba(255, 105, 180, 0)");
+    gradient.addColorStop(0.7, `rgba(135, 206, 250, ${0.3 * shieldPulse})`);
+    gradient.addColorStop(1, `rgba(255, 215, 0, ${0.5 * shieldPulse})`);
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, shieldRadius * shieldPulse, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Shield border
+    ctx.strokeStyle = `rgba(255, 215, 0, ${0.8 * shieldPulse})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, shieldRadius * shieldPulse, 0, Math.PI * 2);
+    ctx.stroke();
+    
+    // Sparkles
+    for (let i = 0; i < 6; i++) {
+      const angle = (state.time * 2 + i * Math.PI / 3);
+      const sx = centerX + Math.cos(angle) * (shieldRadius + 5);
+      const sy = centerY + Math.sin(angle) * (shieldRadius + 5);
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(sx, sy, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
   // Red skateboard under the dog.
   ctx.fillStyle = "#c62026";
   roundRect(x + 1, baseY + 46, 68, 8, 4, true);
@@ -1271,22 +1370,45 @@ function drawBones() {
     const cy = y + bone.height / 2;
     const r = bone.width / 2 - 1;
 
-    // Big golden coin body.
-    ctx.fillStyle = "#f3c745";
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fill();
+    // Golden dog bone when shield is active, regular coin otherwise
+    if (state.shieldTimer > 0) {
+      // Golden dog bone shape
+      ctx.fillStyle = "#ffd700";
+      ctx.strokeStyle = "#d4a125";
+      ctx.lineWidth = 2;
+      
+      // Draw bone shape (two circles connected by rectangle)
+      ctx.beginPath();
+      ctx.arc(cx - 8, cy, 6, 0, Math.PI * 2);
+      ctx.arc(cx + 8, cy, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      
+      ctx.fillRect(cx - 8, cy - 3, 16, 6);
+      ctx.strokeRect(cx - 8, cy - 3, 16, 6);
+      
+      // Add sparkle
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(cx - 4, cy - 2, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Big golden coin body.
+      ctx.fillStyle = "#f3c745";
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
 
-    // Inner gold face.
-    ctx.fillStyle = "#ffd86a";
-    ctx.beginPath();
-    ctx.arc(cx, cy, r - 3, 0, Math.PI * 2);
-    ctx.fill();
+      // Inner gold face.
+      ctx.fillStyle = "#ffd86a";
+      ctx.beginPath();
+      ctx.arc(cx, cy, r - 3, 0, Math.PI * 2);
+      ctx.fill();
 
-    // Rim.
-    ctx.strokeStyle = "#d4a125";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
+      // Rim.
+      ctx.strokeStyle = "#d4a125";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
     ctx.arc(cx, cy, r - 1, 0, Math.PI * 2);
     ctx.stroke();
 
@@ -1299,6 +1421,79 @@ function drawBones() {
     // Coin mark.
     ctx.fillStyle = "#cc951b";
     roundRect(cx - 2, cy - 6, 4, 12, 2, true);
+    }
+  }
+}
+
+function drawUnicorns() {
+  for (const unicorn of state.unicorns) {
+    const x = unicorn.x;
+    const y = unicorn.y + Math.sin(unicorn.bounce) * 4;
+    
+    // Unicorn body (white/rainbow)
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.ellipse(x + 25, y + 28, 18, 14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#ddd";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    
+    // Head
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.ellipse(x + 38, y + 20, 10, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    
+    // Horn (golden with rainbow sparkle)
+    ctx.fillStyle = "#ffd700";
+    ctx.beginPath();
+    ctx.moveTo(x + 40, y + 8);
+    ctx.lineTo(x + 37, y + 18);
+    ctx.lineTo(x + 43, y + 18);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "#d4a125";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    
+    // Sparkles around horn
+    const sparkleColors = ["#ff69b4", "#87ceeb", "#ffd700", "#9370db"];
+    for (let i = 0; i < 4; i++) {
+      const angle = (unicorn.bounce + i * Math.PI / 2) * 2;
+      const sx = x + 40 + Math.cos(angle) * 12;
+      const sy = y + 12 + Math.sin(angle) * 12;
+      ctx.fillStyle = sparkleColors[i];
+      ctx.beginPath();
+      ctx.arc(sx, sy, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    
+    // Eye
+    ctx.fillStyle = "#333";
+    ctx.beginPath();
+    ctx.arc(x + 42, y + 20, 2, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Legs
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x + 18, y + 38);
+    ctx.lineTo(x + 18, y + 44);
+    ctx.moveTo(x + 32, y + 38);
+    ctx.lineTo(x + 32, y + 44);
+    ctx.stroke();
+    
+    // Rainbow mane
+    const maneColors = ["#ff69b4", "#ffd700", "#87ceeb"];
+    for (let i = 0; i < 3; i++) {
+      ctx.fillStyle = maneColors[i];
+      ctx.beginPath();
+      ctx.arc(x + 35 - i * 3, y + 14 + i * 2, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
 
@@ -1536,11 +1731,19 @@ function drawUI() {
     ctx.fillText(`FLY ${state.flyTimer.toFixed(1)}s`, 20, 34);
   }
 
+  if (state.shieldTimer > 0 && !state.gameOver) {
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#ff69b4";
+    ctx.font = "bold 20px Arial";
+    ctx.fillText(`SHIELD ${state.shieldTimer.toFixed(1)}s`, 20, state.flyTimer > 0 ? 58 : 34);
+  }
+
   if (state.graceTimer > 0 && !state.gameOver) {
     ctx.textAlign = "left";
     ctx.fillStyle = "#2f7a43";
     ctx.font = "bold 18px Arial";
-    ctx.fillText(`SAFE ${state.graceTimer.toFixed(1)}s`, 20, 58);
+    const yPos = (state.flyTimer > 0 ? 58 : 34) + (state.shieldTimer > 0 ? 24 : 0);
+    ctx.fillText(`SAFE ${state.graceTimer.toFixed(1)}s`, 20, yPos);
   }
 
 }
@@ -1550,6 +1753,7 @@ function draw() {
   drawObstacles();
   drawBones();
   drawSuperFlags();
+  drawUnicorns();
   drawDog();
   drawUI();
 }
