@@ -29,6 +29,8 @@ const state = {
   harvardClears: 0,
   superCollectibles: 0,
   flyTimeMs: 0,
+  finishPosition: null,
+  finishPositionStatus: "",
   time: 0,
   obstacles: [],
   bones: [],
@@ -121,6 +123,17 @@ async function loadTopScores() {
   }
 }
 
+async function computeFinishPosition(score) {
+  if (!leaderboardDb) return null;
+  try {
+    // Rank = number of scores strictly higher + 1 (ties share the same rank).
+    const higher = await leaderboardDb.collection("scores").where("score", ">", Math.floor(score)).get();
+    return higher.size + 1;
+  } catch (error) {
+    return null;
+  }
+}
+
 const submitLeaderboardScore = async (score) => {
   if (!leaderboardDb) return;
   try {
@@ -180,6 +193,8 @@ function resetGame() {
   state.harvardClears = 0;
   state.superCollectibles = 0;
   state.flyTimeMs = 0;
+  state.finishPosition = null;
+  state.finishPositionStatus = "";
   state.time = 0;
   state.obstacles = [];
   state.bones = [];
@@ -507,6 +522,14 @@ function update(dt) {
         state.highScore = Math.max(state.highScore, Math.floor(state.score));
         if (!state.scoreSubmitted) {
           state.scoreSubmitted = true;
+          // Compute finish position from Firestore immediately.
+          if (leaderboardDb) {
+            state.finishPositionStatus = "Calculating position...";
+            computeFinishPosition(state.score).then((pos) => {
+              state.finishPosition = pos;
+              state.finishPositionStatus = "";
+            });
+          }
           submitLeaderboardScore(state.score);
         }
         break;
@@ -1211,7 +1234,15 @@ function drawUI() {
     ctx.font = "bold 44px Arial";
     ctx.fillText("Game Over", canvas.width / 2, 130);
     ctx.font = "20px Arial";
-    ctx.fillText("Press Space / Arrow Up or tap to restart", canvas.width / 2, 170);
+    const posText = state.finishPosition ? `You finished #${state.finishPosition}` : "";
+    if (posText || state.finishPositionStatus) {
+      const flash = 0.35 + Math.abs(Math.sin(state.time * 10)) * 0.65;
+      ctx.fillStyle = `rgba(210, 30, 45, ${flash})`;
+      ctx.fillText(posText || state.finishPositionStatus, canvas.width / 2, 168);
+      ctx.fillText("Press Space / Arrow Up or tap to restart", canvas.width / 2, 198);
+    } else {
+      ctx.fillText("Press Space / Arrow Up or tap to restart", canvas.width / 2, 170);
+    }
   }
 
   if (state.running && !state.gameOver && state.hypeBannerTimer > 0) {
