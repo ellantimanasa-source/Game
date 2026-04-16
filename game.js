@@ -352,6 +352,9 @@ function update(dt) {
     if (state.flyTimer <= 0) {
       state.flyTimer = 0;
       state.flyPowerMode = "none";
+      // Start safety immediately when power ends,
+      // then refresh it again when the player lands.
+      state.graceTimer = Math.max(state.graceTimer, 3);
       flyEndedThisFrame = true;
     }
     dog.vy += 920 * dt;
@@ -376,10 +379,10 @@ function update(dt) {
     dog.vy = 0;
     dog.onGround = true;
   }
-  if (flyEndedThisFrame && dog.onGround && state.pendingLandingGrace) {
-    state.graceTimer = Math.max(state.graceTimer, 3);
-    state.pendingLandingGrace = false;
-  } else if (!wasOnGround && dog.onGround && state.pendingLandingGrace) {
+  if (flyEndedThisFrame) {
+    state.pendingLandingGrace = true;
+  }
+  if (!wasOnGround && dog.onGround && state.pendingLandingGrace) {
     state.graceTimer = Math.max(state.graceTimer, 3);
     state.pendingLandingGrace = false;
   }
