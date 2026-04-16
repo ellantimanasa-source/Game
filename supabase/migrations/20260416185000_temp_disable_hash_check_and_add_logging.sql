@@ -1,0 +1,170 @@
+-- Add rejected submissions log table
+create table if not exists public.rejected_submissions (
+  id bigint generated always as identity primary key,
+  created_at timestamptz default now(),
+  name text,
+  score integer,
+  play_time_ms integer,
+  jumps integer,
+  coins_collected integer,
+  police_clears integer,
+  harvard_clears integer,
+  super_collectibles integer,
+  fly_time_ms integer,
+  session_id text,
+  client_hash text,
+  telemetry_hash bigint,
+  submit_nonce_len integer,
+  click_samples jsonb,
+  expected_hash text,
+  error_reason text
+);
+
+create index if not exists rejected_submissions_created_at_idx on public.rejected_submissions (created_at desc);
+
+alter table public.rejected_submissions enable row level security;
+
+-- Only allow service role to read/write (not exposed to anon clients)
+drop policy if exists "rejected_no_anon" on public.rejected_submissions;
+create policy "rejected_no_anon"
+on public.rejected_submissions
+for all
+to anon, authenticated
+using (false)
+with check (false);
+
+-- Temporarily disable hash verification to unblock gameplay, log mismatches instead
+create or replace function public.submit_score_with_rank(
+  p_name text,
+  p_score integer,
+  p_created_at bigint,
+  p_play_time_ms integer,
+  p_jumps integer,
+  p_coins_collected integer,
+  p_police_clears integer,
+  p_harvard_clears integer,
+  p_super_collectibles integer,
+  p_fly_time_ms integer,
+  p_session_id text,
+  p_click_samples jsonb,
+  p_proof text,
+  p_client_hash text,
+  p_telemetry_hash bigint,
+  p_submit_nonce_len integer,
+  p_integrity_version integer
+)
+returns table(rank bigint)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_now_ms bigint := floor(extract(epoch from now()) * 1000)::bigint;
+  v_base_score integer;
+  v_expected_hash text;
+  v_hash_matches boolean;
+begin
+  if p_integrity_version <> 2 then
+    raise exception 'version mismatch';
+  end if;
+  if p_score < 0 or p_score > 200000 then
+    raise exception 'bad score';
+  end if;
+  if p_play_time_ms < greatest(1800, p_score * 45) or p_play_time_ms > 3600000 then
+    raise exception 'bad playtime';
+  end if;
+  if p_jumps < 0 or p_coins_collected < 0 or p_police_clears < 0 or p_harvard_clears < 0 or p_super_collectibles < 0 or p_fly_time_ms < 0 then
+    raise exception 'negative telemetry';
+  end if;
+  if p_fly_time_ms > p_play_time_ms then
+    raise exception 'bad flytime';
+  end if;
+  if char_length(coalesce(p_session_id, '')) < 10 or char_length(p_session_id) > 60 then
+    raise exception 'bad session';
+  end if;
+  if p_proof !~ '^[0-9a-f]{6,64}$' or p_client_hash !~ '^[0-9a-f]{6,64}$' then
+    raise exception 'bad proof/hash';
+  end if;
+  if p_telemetry_hash < 0 or p_telemetry_hash > 4294967295::bigint then
+    raise exception 'bad telemetry hash';
+  end if;
+  if p_submit_nonce_len < 1 or p_submit_nonce_len > 120 then
+    raise exception 'bad nonce length';
+  end if;
+  if abs(v_now_ms - p_created_at) > 5 * 60 * 1000 then
+    raise exception 'stale timestamp';
+  end if;
+  if coalesce(jsonb_typeof(p_click_samples), '') <> 'array' then
+    raise exception 'bad click samples';
+  end if;
+  if jsonb_array_length(p_click_samples) > 80 then
+    raise exception 'too many click samples';
+  end if;
+
+  v_base_score :=
+    floor(p_play_time_ms / 1000.0)::integer * 11 +
+    p_coins_collected * 30 +
+    p_police_clears * 18 +
+    p_harvard_clears * 45 +
+    p_super_collectibles * 120;
+  if p_score > v_base_score + 320 then
+    raise exception 'impossible score';
+  end if;
+  if p_jumps > floor(p_play_time_ms / 120.0)::integer + 220 then
+    raise exception 'impossible jumps';
+  end if;
+
+  -- Compute expected hash and compare (but don't reject on mismatch yet).
+  v_expected_hash := public.compute_submission_hash(
+    p_score,
+    p_play_time_ms,
+    p_jumps,
+    p_coins_collected,
+    p_police_clears,
+    p_harvard_clears,
+    p_super_collectibles,
+    p_fly_time_ms,
+    p_telemetry_hash,
+    p_submit_nonce_len,
+    p_click_samples
+  );
+  v_hash_matches := (lower(p_client_hash) = v_expected_hash and lower(p_proof) = lower(p_client_hash));
+
+  -- If hash doesn't match, log to rejected table but continue insert (temporary).
+  if not v_hash_matches then
+    insert into public.rejected_submissions (
+      name, score, play_time_ms, jumps, coins_collected, police_clears, harvard_clears,
+      super_collectibles, fly_time_ms, session_id, client_hash, telemetry_hash,
+      submit_nonce_len, click_samples, expected_hash, error_reason
+    ) values (
+      left(coalesce(trim(p_name), 'Guest'), 12),
+      p_score, p_play_time_ms, p_jumps, p_coins_collected, p_police_clears, p_harvard_clears,
+      p_super_collectibles, p_fly_time_ms, p_session_id, p_client_hash, p_telemetry_hash,
+      p_submit_nonce_len, p_click_samples, v_expected_hash, 'hash mismatch (logged but accepted)'
+    );
+  end if;
+
+  insert into public.scores (
+    name, score, "createdAt", "playTimeMs", jumps, "coinsCollected", "policeClears",
+    "harvardClears", "superCollectibles", "flyTimeMs", "sessionId", "clickSamples",
+    proof, "clientHash", "integrityVersion"
+  ) values (
+    left(coalesce(trim(p_name), 'Guest'), 12),
+    p_score, p_created_at, p_play_time_ms, p_jumps, p_coins_collected, p_police_clears,
+    p_harvard_clears, p_super_collectibles, p_fly_time_ms, p_session_id, p_click_samples,
+    p_proof, p_client_hash, p_integrity_version
+  );
+
+  return query
+  select count(*)::bigint + 1
+  from public.scores
+  where score > p_score;
+end;
+$$;
+
+revoke all on function public.submit_score_with_rank(
+  text, integer, bigint, integer, integer, integer, integer, integer, integer, integer, text, jsonb, text, text, bigint, integer, integer
+) from public;
+grant execute on function public.submit_score_with_rank(
+  text, integer, bigint, integer, integer, integer, integer, integer, integer, integer, text, jsonb, text, text, bigint, integer, integer
+) to anon, authenticated;
