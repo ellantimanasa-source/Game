@@ -19,6 +19,7 @@ const state = {
   flyPowerMode: "none",
   graceTimer: 0,
   pendingLandingGrace: false,
+  hypeBannerTimer: 0,
   scoreSubmitted: false,
   sessionId: "",
   runStartMs: 0,
@@ -120,7 +121,7 @@ async function loadTopScores() {
   }
 }
 
-async function submitScore(score) {
+const submitLeaderboardScore = async (score) => {
   if (!leaderboardDb) return;
   try {
     const now = Date.now();
@@ -142,7 +143,7 @@ async function submitScore(score) {
   } catch (error) {
     // Keep gameplay smooth even if submit fails.
   }
-}
+};
 
 function resizeCanvas() {
   canvas.width = window.innerWidth;
@@ -169,6 +170,7 @@ function resetGame() {
   state.flyPowerMode = "none";
   state.graceTimer = 0;
   state.pendingLandingGrace = false;
+  state.hypeBannerTimer = 2.6;
   state.scoreSubmitted = false;
   state.sessionId = `run_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
   state.runStartMs = Date.now();
@@ -339,6 +341,10 @@ function update(dt) {
   state.time += dt;
   state.score += dt * 11;
   state.speed = Math.min(560, 280 + state.time * 7);
+  if (state.hypeBannerTimer > 0) {
+    state.hypeBannerTimer -= dt;
+    if (state.hypeBannerTimer < 0) state.hypeBannerTimer = 0;
+  }
 
   if (state.flyTimer > 0) {
     state.flyTimeMs += dt * 1000;
@@ -498,7 +504,7 @@ function update(dt) {
         state.highScore = Math.max(state.highScore, Math.floor(state.score));
         if (!state.scoreSubmitted) {
           state.scoreSubmitted = true;
-          submitScore(state.score);
+          submitLeaderboardScore(state.score);
         }
         break;
       }
@@ -1205,6 +1211,43 @@ function drawUI() {
     ctx.fillText("Press Space / Arrow Up or tap to restart", canvas.width / 2, 170);
   }
 
+  if (state.running && !state.gameOver && state.hypeBannerTimer > 0) {
+    const progress = 1 - state.hypeBannerTimer / 2.6;
+    const flashCycles = Math.min(1, progress / 0.78);
+    const flash = 0.45 + Math.abs(Math.sin(flashCycles * Math.PI * 3)) * 0.55;
+    const alpha = Math.max(0, 1 - progress * 0.9);
+    const scale = 1 + Math.sin(progress * Math.PI) * 0.08;
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height * 0.24;
+
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.scale(scale, scale);
+    ctx.textAlign = "center";
+
+    // 3D shadow stack
+    ctx.font = "bold 54px Arial";
+    ctx.fillStyle = `rgba(10, 28, 64, ${0.28 * alpha})`;
+    ctx.fillText("LET'S GO", 5, -6 + 5);
+    ctx.fillText("BULL DOGS!!", 5, 54 + 5);
+    ctx.fillStyle = `rgba(20, 52, 112, ${0.42 * alpha})`;
+    ctx.fillText("LET'S GO", 3, -6 + 3);
+    ctx.fillText("BULL DOGS!!", 3, 54 + 3);
+
+    // Main Yale-blue text
+    ctx.fillStyle = `rgba(12, 55, 136, ${alpha})`;
+    ctx.fillText("LET'S GO", 0, -6);
+    ctx.fillStyle = `rgba(18, 68, 164, ${alpha})`;
+    ctx.fillText("BULL DOGS!!", 0, 54);
+
+    // Flash highlight (exactly 3 pulses)
+    ctx.strokeStyle = `rgba(172, 210, 255, ${alpha * flash})`;
+    ctx.lineWidth = 3;
+    ctx.strokeText("LET'S GO", 0, -6);
+    ctx.strokeText("BULL DOGS!!", 0, 54);
+    ctx.restore();
+  }
+
   if (state.flyTimer > 0 && !state.gameOver) {
     ctx.textAlign = "left";
     ctx.fillStyle = "#1d3f99";
@@ -1257,3 +1300,13 @@ setupControls();
 window.addEventListener("resize", resizeCanvas);
 initLeaderboard();
 requestAnimationFrame(gameLoop);
+
+// Block obvious console misuse of submitScore().
+Object.defineProperty(window, "submitScore", {
+  value: () => {
+    console.warn("get lost");
+    return Promise.resolve();
+  },
+  writable: false,
+  configurable: false
+});
