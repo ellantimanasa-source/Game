@@ -262,7 +262,8 @@ const submitLeaderboardScore = async (score, payload = null) => {
 
     const { data, error } = await supabaseClient.rpc("submit_score_with_rank", submission);
     if (error) {
-      state.finishPositionStatus = "Submit failed";
+      const msg = typeof error.message === "string" ? error.message : "RPC error";
+      state.finishPositionStatus = `Submit failed: ${msg}`;
       return;
     }
     const rank =
@@ -296,13 +297,14 @@ const submitLeaderboardScore = async (score, payload = null) => {
         integrityVersion: 2
       });
       if (insertError) {
-        state.finishPositionStatus = "Submit failed";
+        const im = typeof insertError.message === "string" ? insertError.message : "insert error";
+        state.finishPositionStatus = `Submit failed: ${im}`;
       }
     }
     await loadTopScores();
   } catch (error) {
-    // Keep gameplay smooth even if submit fails.
-    state.finishPositionStatus = "Submit failed";
+    const msg = error && typeof error.message === "string" ? error.message : "network error";
+    state.finishPositionStatus = `Submit failed: ${msg}`;
   }
 };
 
