@@ -116,23 +116,20 @@ function createSubmissionPayload(score) {
   const now = Date.now();
   const playTimeMs = Math.max(0, now - state.runStartMs);
   const cleanScore = Math.floor(score);
-  const minPlausibleMs = Math.max(1800, cleanScore * 45);
   if (!state.gameOver || !state.running) return null;
   if (state.scoreSubmitted && cleanScore !== Math.floor(state.score)) return null;
-  if (playTimeMs < minPlausibleMs) return null;
-  if (state.jumps < 0 || state.coinsCollected < 0 || state.superCollectibles < 0) return null;
-
-  const baseFromActions =
-    Math.floor(playTimeMs / 1000) * 11 +
-    state.coinsCollected * 30 +
-    state.policeClears * 18 +
-    state.harvardClears * 45 +
-    state.superCollectibles * 120;
-  const maxAllowedScore = baseFromActions + 320;
-  if (cleanScore > maxAllowedScore) return null;
-
-  const maxLikelyJumps = Math.floor(playTimeMs / 120) + 220;
-  if (state.jumps > maxLikelyJumps) return null;
+  if (playTimeMs < 1200) return null;
+  if (cleanScore < 0 || cleanScore > 200000) return null;
+  if (
+    state.jumps < 0 ||
+    state.coinsCollected < 0 ||
+    state.policeClears < 0 ||
+    state.harvardClears < 0 ||
+    state.superCollectibles < 0 ||
+    state.flyTimeMs < 0
+  ) {
+    return null;
+  }
 
   const clickSamples = normalizeClickSamples(state.clickSamples);
   const proof = buildClientHash({
@@ -731,7 +728,7 @@ function update(dt) {
           if (submissionPayload) {
             submitLeaderboardScore(state.score, submissionPayload);
           } else {
-            state.finishPositionStatus = "Score rejected (integrity check)";
+            state.finishPositionStatus = "Score rejected before submit";
           }
         }
         break;
