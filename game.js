@@ -132,7 +132,7 @@ function createSubmissionPayload(score) {
   }
 
   const clickSamples = normalizeClickSamples(state.clickSamples);
-  const proof = buildClientHash({
+  const clientHash = buildClientHash({
     score: cleanScore,
     playTimeMs,
     jumps: state.jumps,
@@ -150,7 +150,8 @@ function createSubmissionPayload(score) {
     now,
     playTimeMs,
     score: cleanScore,
-    proof,
+    proof: clientHash,
+    clientHash: clientHash,
     clickSamples,
     telemetryHash: state.telemetryHash,
     submitNonceLen: state.submitNonce.length
