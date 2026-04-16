@@ -20,6 +20,14 @@ const state = {
   graceTimer: 0,
   pendingLandingGrace: false,
   scoreSubmitted: false,
+  sessionId: "",
+  runStartMs: 0,
+  jumps: 0,
+  coinsCollected: 0,
+  policeClears: 0,
+  harvardClears: 0,
+  superCollectibles: 0,
+  flyTimeMs: 0,
   time: 0,
   obstacles: [],
   bones: [],
@@ -115,10 +123,20 @@ async function loadTopScores() {
 async function submitScore(score) {
   if (!leaderboardDb) return;
   try {
+    const now = Date.now();
+    const playTimeMs = Math.max(0, now - state.runStartMs);
     await leaderboardDb.collection("scores").add({
       name: playerName || "Guest",
       score: Math.floor(score),
-      createdAt: Date.now()
+      createdAt: now,
+      playTimeMs: Math.floor(playTimeMs),
+      jumps: state.jumps,
+      coinsCollected: state.coinsCollected,
+      policeClears: state.policeClears,
+      harvardClears: state.harvardClears,
+      superCollectibles: state.superCollectibles,
+      flyTimeMs: Math.floor(state.flyTimeMs),
+      sessionId: state.sessionId
     });
     await loadTopScores();
   } catch (error) {
@@ -152,6 +170,14 @@ function resetGame() {
   state.graceTimer = 0;
   state.pendingLandingGrace = false;
   state.scoreSubmitted = false;
+  state.sessionId = `run_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
+  state.runStartMs = Date.now();
+  state.jumps = 0;
+  state.coinsCollected = 0;
+  state.policeClears = 0;
+  state.harvardClears = 0;
+  state.superCollectibles = 0;
+  state.flyTimeMs = 0;
   state.time = 0;
   state.obstacles = [];
   state.bones = [];
@@ -182,11 +208,13 @@ function jump() {
   }
   if (state.flyTimer > 0) {
     dog.vy = -430;
+    state.jumps += 1;
     return;
   }
   if (dog.onGround) {
     dog.vy = dog.jumpPower;
     dog.onGround = false;
+    state.jumps += 1;
   }
 }
 
@@ -313,6 +341,7 @@ function update(dt) {
   state.speed = Math.min(560, 280 + state.time * 7);
 
   if (state.flyTimer > 0) {
+    state.flyTimeMs += dt * 1000;
     state.flyTimer -= dt;
     if (state.flyTimer <= 0) {
       state.flyTimer = 0;
@@ -406,8 +435,10 @@ function update(dt) {
     if (!obstacle.cleared && obstacle.x + obstacle.width < dog.x - 4) {
       if (obstacle.kind === "harvardMascot") {
         state.score += 45;
+        state.harvardClears += 1;
       } else if (obstacle.kind === "securityGuard") {
         state.score += 18;
+        state.policeClears += 1;
       }
       obstacle.cleared = true;
     }
@@ -483,6 +514,7 @@ function update(dt) {
     if (collected) {
       bone.collected = true;
       state.score += 30;
+      state.coinsCollected += 1;
     }
   }
 
@@ -495,6 +527,7 @@ function update(dt) {
     if (collected) {
       flag.collected = true;
       state.score += 120;
+      state.superCollectibles += 1;
       state.flyTimer = 5;
       state.flyCoinRowTimer = 0;
       state.graceTimer = 0;
