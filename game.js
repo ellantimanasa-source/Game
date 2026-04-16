@@ -29,8 +29,15 @@ const state = {
   harvardClears: 0,
   superCollectibles: 0,
   flyTimeMs: 0,
+  clickSamples: [],
+  telemetryHash: 0,
+  submitNonce: "",
   finishPosition: null,
   finishPositionStatus: "",
+  groundYCurrent: 0,
+  curveCooldown: 0,
+  roadScroll: 0,
+  curveSegments: [],
   time: 0,
   obstacles: [],
   bones: [],
@@ -50,18 +57,115 @@ const dog = {
   legPhase: 0
 };
 
-// Paste your Firebase project config here to enable global leaderboard.
-// You can find it in Firebase Console -> Project settings -> Your apps -> SDK setup and configuration.
-const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCduewTnt04yxqYn3nYnpD68lUvNYPTQPA",
-  authDomain: "game-95425.firebaseapp.com",
-  projectId: "game-95425",
-  storageBucket: "game-95425.firebasestorage.app",
-  messagingSenderId: "366606072020",
-  appId: "1:366606072020:web:df4d17c31e8aee81dd2341"
-};
+function getRoadOffsetAtX(x) {
+  if (!state.curveSegments.length) return 0;
+  const worldX = x + state.roadScroll;
+  let offset = 0;
+  for (const segment of state.curveSegments) {
+    if (worldX < segment.start || worldX > segment.end) continue;
+    const t = (worldX - segment.start) / (segment.end - segment.start);
+    const edgeFade = Math.sin(t * Math.PI);
+    offset += Math.sin(worldX * segment.frequency + segment.phase) * segment.amp * edgeFade;
+  }
+  return offset;
+}
 
-let leaderboardDb = null;
+function getRoadYAtX(x) {
+  return GROUND_Y + getRoadOffsetAtX(x);
+}
+
+function isCurveVisible() {
+  if (!state.curveSegments.length) return false;
+  const viewStart = state.roadScroll - 120;
+  const viewEnd = state.roadScroll + canvas.width + 120;
+  return state.curveSegments.some((segment) => segment.end > viewStart && segment.start < viewEnd);
+}
+
+function mixHash(prev, value) {
+  const v = Number.isFinite(value) ? Math.floor(value) : 0;
+  return (((prev * 33) ^ (v + 0x9e3779b9)) >>> 0);
+}
+
+function normalizeClickSamples(samples) {
+  if (!Array.isArray(samples)) return [];
+  return samples
+    .filter((v) => Number.isFinite(v) && v >= 0)
+    .map((v) => Math.floor(v))
+    .slice(0, 80);
+}
+
+function buildClientHash(input) {
+  let h = 2166136261 >>> 0;
+  h = mixHash(h, input.score);
+  h = mixHash(h, input.playTimeMs);
+  h = mixHash(h, input.jumps);
+  h = mixHash(h, input.coinsCollected);
+  h = mixHash(h, input.policeClears);
+  h = mixHash(h, input.harvardClears);
+  h = mixHash(h, input.superCollectibles);
+  h = mixHash(h, input.flyTimeMs);
+  h = mixHash(h, input.telemetryHash);
+  h = mixHash(h, input.submitNonceLen);
+  for (let i = 0; i < input.clickSamples.length; i++) {
+    h = mixHash(h, input.clickSamples[i] + i * 17);
+  }
+  return h.toString(16);
+}
+
+function createSubmissionPayload(score) {
+  const now = Date.now();
+  const playTimeMs = Math.max(0, now - state.runStartMs);
+  const cleanScore = Math.floor(score);
+  const minPlausibleMs = Math.max(1800, cleanScore * 45);
+  if (!state.gameOver || !state.running) return null;
+  if (state.scoreSubmitted && cleanScore !== Math.floor(state.score)) return null;
+  if (playTimeMs < minPlausibleMs) return null;
+  if (state.jumps < 0 || state.coinsCollected < 0 || state.superCollectibles < 0) return null;
+
+  const baseFromActions =
+    Math.floor(playTimeMs / 1000) * 11 +
+    state.coinsCollected * 30 +
+    state.policeClears * 18 +
+    state.harvardClears * 45 +
+    state.superCollectibles * 120;
+  const maxAllowedScore = baseFromActions + 320;
+  if (cleanScore > maxAllowedScore) return null;
+
+  const maxLikelyJumps = Math.floor(playTimeMs / 120) + 220;
+  if (state.jumps > maxLikelyJumps) return null;
+
+  const clickSamples = normalizeClickSamples(state.clickSamples);
+  const proof = buildClientHash({
+    score: cleanScore,
+    playTimeMs,
+    jumps: state.jumps,
+    coinsCollected: state.coinsCollected,
+    policeClears: state.policeClears,
+    harvardClears: state.harvardClears,
+    superCollectibles: state.superCollectibles,
+    flyTimeMs: Math.floor(state.flyTimeMs),
+    telemetryHash: state.telemetryHash,
+    submitNonceLen: state.submitNonce.length,
+    clickSamples
+  });
+
+  return {
+    now,
+    playTimeMs,
+    score: cleanScore,
+    proof,
+    clickSamples,
+    telemetryHash: state.telemetryHash,
+    submitNonceLen: state.submitNonce.length
+  };
+}
+
+// Supabase config for global leaderboard.
+// Fill these from Supabase dashboard -> Project Settings -> API.
+const SUPABASE_URL = "https://sdaajuoywdbxwqfmvlqg.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_wTVyg4HZ4d9FhsZv-VdScw_-j1vy6Wb";
+
+let supabaseClient = null;
 let playerName = localStorage.getItem("yaleRunnerPlayerName") || "";
 
 if (!playerName) {
@@ -70,8 +174,15 @@ if (!playerName) {
   localStorage.setItem("yaleRunnerPlayerName", playerName);
 }
 
-function hasFirebaseConfig() {
-  return Boolean(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.projectId && window.firebase);
+function hasSupabaseConfig() {
+  return (
+    typeof SUPABASE_URL === "string" &&
+    SUPABASE_URL.startsWith("https://") &&
+    typeof SUPABASE_ANON_KEY === "string" &&
+    SUPABASE_ANON_KEY.length > 20 &&
+    window.supabase &&
+    typeof window.supabase.createClient === "function"
+  );
 }
 
 function renderLeaderboard(items, message = "") {
@@ -95,13 +206,14 @@ function pinLeaderboardTopRight() {
 }
 
 async function initLeaderboard() {
-  if (!hasFirebaseConfig()) {
-    renderLeaderboard([], "Add Firebase config");
+  if (!hasSupabaseConfig()) {
+    renderLeaderboard([], "Add Supabase config");
     return;
   }
   try {
-    const app = firebase.apps.length ? firebase.app() : firebase.initializeApp(FIREBASE_CONFIG);
-    leaderboardDb = app.firestore();
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false }
+    });
     await loadTopScores();
   } catch (error) {
     renderLeaderboard([], "Leaderboard unavailable");
@@ -109,52 +221,91 @@ async function initLeaderboard() {
 }
 
 async function loadTopScores() {
-  if (!leaderboardDb) return;
+  if (!supabaseClient) return;
   try {
-    const snapshot = await leaderboardDb
-      .collection("scores")
-      .orderBy("score", "desc")
-      .limit(5)
-      .get();
-    const items = snapshot.docs.map((doc) => doc.data());
+    const { data, error } = await supabaseClient
+      .from("scores")
+      .select("name,score")
+      .order("score", { ascending: false })
+      .limit(5);
+    if (error) throw error;
+    const items = (data || []).map((item) => ({
+      name: item.name || "Guest",
+      score: Number.isFinite(item.score) ? Math.floor(item.score) : 0
+    }));
     renderLeaderboard(items);
   } catch (error) {
     renderLeaderboard([], "Read failed");
   }
 }
 
-async function computeFinishPosition(score) {
-  if (!leaderboardDb) return null;
+const submitLeaderboardScore = async (score, payload = null) => {
+  if (!supabaseClient) return;
+  if (!payload || typeof payload.proof !== "string") return;
   try {
-    // Rank = number of scores strictly higher + 1 (ties share the same rank).
-    const higher = await leaderboardDb.collection("scores").where("score", ">", Math.floor(score)).get();
-    return higher.size + 1;
-  } catch (error) {
-    return null;
-  }
-}
+    const submission = {
+      p_name: playerName || "Guest",
+      p_score: payload.score,
+      p_created_at: payload.now,
+      p_play_time_ms: Math.floor(payload.playTimeMs),
+      p_jumps: state.jumps,
+      p_coins_collected: state.coinsCollected,
+      p_police_clears: state.policeClears,
+      p_harvard_clears: state.harvardClears,
+      p_super_collectibles: state.superCollectibles,
+      p_fly_time_ms: Math.floor(state.flyTimeMs),
+      p_session_id: state.sessionId,
+      p_click_samples: payload.clickSamples,
+      p_proof: payload.proof,
+      p_client_hash: payload.proof,
+      p_telemetry_hash: payload.telemetryHash,
+      p_submit_nonce_len: payload.submitNonceLen,
+      p_integrity_version: 2
+    };
 
-const submitLeaderboardScore = async (score) => {
-  if (!leaderboardDb) return;
-  try {
-    const now = Date.now();
-    const playTimeMs = Math.max(0, now - state.runStartMs);
-    await leaderboardDb.collection("scores").add({
-      name: playerName || "Guest",
-      score: Math.floor(score),
-      createdAt: now,
-      playTimeMs: Math.floor(playTimeMs),
-      jumps: state.jumps,
-      coinsCollected: state.coinsCollected,
-      policeClears: state.policeClears,
-      harvardClears: state.harvardClears,
-      superCollectibles: state.superCollectibles,
-      flyTimeMs: Math.floor(state.flyTimeMs),
-      sessionId: state.sessionId
-    });
+    const { data, error } = await supabaseClient.rpc("submit_score_with_rank", submission);
+    if (error) {
+      state.finishPositionStatus = "Submit failed";
+      return;
+    }
+    const rank =
+      typeof data === "number"
+        ? data
+        : Array.isArray(data) && data.length && Number.isFinite(data[0]?.rank)
+          ? data[0].rank
+          : null;
+    if (Number.isFinite(rank) && rank > 0) {
+      state.finishPosition = Math.floor(rank);
+      state.finishPositionStatus = "";
+    } else {
+      state.finishPositionStatus = "Rank unavailable";
+    }
+
+    // Fallback if RPC exists but returns null rank unexpectedly.
+    if (!Number.isFinite(rank)) {
+      const { error: insertError } = await supabaseClient.from("scores").insert({
+        name: playerName || "Guest",
+        score: payload.score,
+        createdAt: payload.now,
+        playTimeMs: Math.floor(payload.playTimeMs),
+        jumps: state.jumps,
+        coinsCollected: state.coinsCollected,
+        policeClears: state.policeClears,
+        harvardClears: state.harvardClears,
+        superCollectibles: state.superCollectibles,
+        flyTimeMs: Math.floor(state.flyTimeMs),
+        sessionId: state.sessionId,
+        proof: payload.proof,
+        integrityVersion: 2
+      });
+      if (insertError) {
+        state.finishPositionStatus = "Submit failed";
+      }
+    }
     await loadTopScores();
   } catch (error) {
     // Keep gameplay smooth even if submit fails.
+    state.finishPositionStatus = "Submit failed";
   }
 };
 
@@ -162,11 +313,12 @@ function resizeCanvas() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
   GROUND_Y = canvas.height - 62;
+  state.groundYCurrent = GROUND_Y;
 
   if (dog.onGround) {
-    dog.y = GROUND_Y - dog.height;
-  } else if (dog.y > GROUND_Y - dog.height) {
-    dog.y = GROUND_Y - dog.height;
+    dog.y = getRoadYAtX(dog.x + dog.width * 0.5) - dog.height;
+  } else if (dog.y > getRoadYAtX(dog.x + dog.width * 0.5) - dog.height) {
+    dog.y = getRoadYAtX(dog.x + dog.width * 0.5) - dog.height;
   }
 }
 
@@ -193,14 +345,21 @@ function resetGame() {
   state.harvardClears = 0;
   state.superCollectibles = 0;
   state.flyTimeMs = 0;
+  state.clickSamples = [];
+  state.telemetryHash = mixHash(Date.now() >>> 0, Math.random() * 1e9);
+  state.submitNonce = `${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36)}`;
   state.finishPosition = null;
   state.finishPositionStatus = "";
+  state.groundYCurrent = GROUND_Y;
+  state.curveCooldown = 4;
+  state.roadScroll = 0;
+  state.curveSegments = [];
   state.time = 0;
   state.obstacles = [];
   state.bones = [];
   state.superFlags = [];
   state.clouds = createClouds();
-  dog.y = GROUND_Y - dog.height;
+  dog.y = getRoadYAtX(dog.x + dog.width * 0.5) - dog.height;
   dog.vy = 0;
   dog.onGround = true;
   dog.legPhase = 0;
@@ -226,24 +385,38 @@ function jump() {
   if (state.flyTimer > 0) {
     dog.vy = -430;
     state.jumps += 1;
+    if ((state.jumps - 1) % 10 === 0) {
+      const sample = Math.max(0, Date.now() - state.runStartMs);
+      state.clickSamples.push(sample);
+      if (state.clickSamples.length > 80) state.clickSamples.shift();
+    }
+    state.telemetryHash = mixHash(state.telemetryHash, state.jumps + 17);
     return;
   }
   if (dog.onGround) {
     dog.vy = dog.jumpPower;
     dog.onGround = false;
     state.jumps += 1;
+    if ((state.jumps - 1) % 10 === 0) {
+      const sample = Math.max(0, Date.now() - state.runStartMs);
+      state.clickSamples.push(sample);
+      if (state.clickSamples.length > 80) state.clickSamples.shift();
+    }
+    state.telemetryHash = mixHash(state.telemetryHash, state.jumps + 29);
   }
 }
 
 function spawnObstacle() {
   const harvardChance = 0.32;
+  const inCurve = isCurveVisible();
+  const spawnX = canvas.width + 24;
   if (Math.random() < harvardChance) {
-    const tall = Math.random() < 0.45;
+    const tall = inCurve ? Math.random() < 0.2 : Math.random() < 0.45;
     const width = tall ? 38 : 34;
     const height = tall ? 66 : 58;
     state.obstacles.push({
-      x: canvas.width + 24,
-      y: GROUND_Y - height,
+      x: spawnX,
+      y: getRoadYAtX(spawnX + width * 0.5) - height,
       width,
       height,
       kind: "harvardMascot",
@@ -253,7 +426,7 @@ function spawnObstacle() {
     return;
   }
 
-  const maxCount = Math.min(4, 2 + Math.floor(state.time / 20));
+  const maxCount = inCurve ? 2 : Math.min(4, 2 + Math.floor(state.time / 20));
   const officersCount = 1 + Math.floor(Math.random() * maxCount);
   const officers = [];
 
@@ -284,8 +457,8 @@ function spawnObstacle() {
   const height = maxHeight;
 
   state.obstacles.push({
-    x: canvas.width + 24,
-    y: GROUND_Y - height,
+    x: spawnX,
+    y: getRoadYAtX(spawnX + width * 0.5) - height,
     width,
     height,
     kind: "securityGuard",
@@ -355,11 +528,36 @@ function update(dt) {
 
   state.time += dt;
   state.score += dt * 11;
+  state.telemetryHash = mixHash(state.telemetryHash, dt * 100000 + state.speed + state.score);
   state.speed = Math.min(560, 280 + state.time * 7);
+  state.roadScroll += state.speed * dt;
+  state.curveCooldown -= dt;
   if (state.hypeBannerTimer > 0) {
     state.hypeBannerTimer -= dt;
     if (state.hypeBannerTimer < 0) state.hypeBannerTimer = 0;
   }
+
+  if (state.curveCooldown <= 0 && Math.random() < 0.008) {
+    state.curveCooldown = 6 + Math.random() * 4;
+    const start = state.roadScroll + canvas.width + 30;
+    const length = 520 + Math.random() * 300;
+    state.curveSegments.push({
+      start,
+      end: start + length,
+      amp: 10 + Math.random() * 4,
+      frequency: 0.012,
+      phase: Math.random() * Math.PI * 2
+    });
+    state.graceTimer = Math.max(state.graceTimer, 0.8);
+  }
+  const clearBefore = state.roadScroll - 260;
+  const hadSegments = state.curveSegments.length > 0;
+  state.curveSegments = state.curveSegments.filter((segment) => segment.end > clearBefore);
+  if (hadSegments && state.curveSegments.length === 0) {
+    state.graceTimer = Math.max(state.graceTimer, 0.8);
+  }
+
+  state.groundYCurrent = GROUND_Y;
 
   if (state.flyTimer > 0) {
     state.flyTimeMs += dt * 1000;
@@ -373,7 +571,8 @@ function update(dt) {
       flyEndedThisFrame = true;
     }
     dog.vy += 920 * dt;
-    if (dog.y > GROUND_Y - 130) {
+    const dogRoadY = getRoadYAtX(dog.x + dog.width * 0.5);
+    if (dog.y > dogRoadY - 130) {
       dog.vy -= 1500 * dt;
     }
     if (dog.y < 34) {
@@ -389,8 +588,9 @@ function update(dt) {
   }
   dog.y += dog.vy * dt;
 
-  if (dog.y >= GROUND_Y - dog.height) {
-    dog.y = GROUND_Y - dog.height;
+  const roadYAtDog = getRoadYAtX(dog.x + dog.width * 0.5);
+  if (dog.y >= roadYAtDog - dog.height) {
+    dog.y = roadYAtDog - dog.height;
     dog.vy = 0;
     dog.onGround = true;
   }
@@ -407,11 +607,12 @@ function update(dt) {
   state.spawnTimer -= dt;
   if (state.spawnTimer <= 0) {
     spawnObstacle();
-    const min = 0.75;
-    const max = 1.4;
+    const inCurve = isCurveVisible();
+    const min = inCurve ? 0.95 : 0.75;
+    const max = inCurve ? 1.8 : 1.4;
     const speedFactor = (state.speed - 280) / 280;
-    state.spawnTimer = max - Math.random() * (max - min) - speedFactor * 0.25;
-    state.spawnTimer = Math.max(0.52, state.spawnTimer);
+    state.spawnTimer = max - Math.random() * (max - min) - speedFactor * (inCurve ? 0.12 : 0.25);
+    state.spawnTimer = Math.max(inCurve ? 0.8 : 0.52, state.spawnTimer);
   }
 
   if (state.flyTimer > 0) {
@@ -452,6 +653,7 @@ function update(dt) {
 
   for (const obstacle of state.obstacles) {
     obstacle.x -= state.speed * dt;
+    obstacle.y = getRoadYAtX(obstacle.x + obstacle.width * 0.5) - obstacle.height;
   }
 
   // Reward successful clears: Harvard mascot grants more than police.
@@ -460,9 +662,11 @@ function update(dt) {
       if (obstacle.kind === "harvardMascot") {
         state.score += 45;
         state.harvardClears += 1;
+        state.telemetryHash = mixHash(state.telemetryHash, 4500 + state.harvardClears);
       } else if (obstacle.kind === "securityGuard") {
         state.score += 18;
         state.policeClears += 1;
+        state.telemetryHash = mixHash(state.telemetryHash, 1800 + state.policeClears);
       }
       obstacle.cleared = true;
     }
@@ -522,15 +726,13 @@ function update(dt) {
         state.highScore = Math.max(state.highScore, Math.floor(state.score));
         if (!state.scoreSubmitted) {
           state.scoreSubmitted = true;
-          // Compute finish position from Firestore immediately.
-          if (leaderboardDb) {
-            state.finishPositionStatus = "Calculating position...";
-            computeFinishPosition(state.score).then((pos) => {
-              state.finishPosition = pos;
-              state.finishPositionStatus = "";
-            });
+          state.finishPositionStatus = "Calculating position...";
+          const submissionPayload = createSubmissionPayload(state.score);
+          if (submissionPayload) {
+            submitLeaderboardScore(state.score, submissionPayload);
+          } else {
+            state.finishPositionStatus = "Score rejected (integrity check)";
           }
-          submitLeaderboardScore(state.score);
         }
         break;
       }
@@ -547,6 +749,7 @@ function update(dt) {
       bone.collected = true;
       state.score += 30;
       state.coinsCollected += 1;
+      state.telemetryHash = mixHash(state.telemetryHash, 3000 + state.coinsCollected);
     }
   }
 
@@ -560,6 +763,7 @@ function update(dt) {
       flag.collected = true;
       state.score += 120;
       state.superCollectibles += 1;
+      state.telemetryHash = mixHash(state.telemetryHash, 12000 + state.superCollectibles);
       state.flyTimer = 5;
       state.flyCoinRowTimer = 0;
       state.graceTimer = 0;
@@ -601,13 +805,25 @@ function drawBackground() {
   }
 
   ctx.fillStyle = "#d6ecf8";
-  ctx.fillRect(0, GROUND_Y, canvas.width, canvas.height - GROUND_Y);
+  // Curvy segments scroll in from the right like upcoming road.
+  ctx.fillStyle = "#d6ecf8";
+  ctx.beginPath();
+  ctx.moveTo(0, getRoadYAtX(0));
+  for (let x = 0; x <= canvas.width; x += 8) {
+    ctx.lineTo(x, getRoadYAtX(x));
+  }
+  ctx.lineTo(canvas.width, canvas.height);
+  ctx.lineTo(0, canvas.height);
+  ctx.closePath();
+  ctx.fill();
 
   ctx.strokeStyle = "#7fa7c4";
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(0, GROUND_Y + 0.5);
-  ctx.lineTo(canvas.width, GROUND_Y + 0.5);
+  ctx.moveTo(0, getRoadYAtX(0) + 0.5);
+  for (let x = 0; x <= canvas.width; x += 8) {
+    ctx.lineTo(x, getRoadYAtX(x) + 0.5);
+  }
   ctx.stroke();
 }
 
@@ -1299,6 +1515,7 @@ function drawUI() {
     ctx.font = "bold 18px Arial";
     ctx.fillText(`SAFE ${state.graceTimer.toFixed(1)}s`, 20, 58);
   }
+
 }
 
 function draw() {
@@ -1341,6 +1558,15 @@ requestAnimationFrame(gameLoop);
 
 // Block obvious console misuse of submitScore().
 Object.defineProperty(window, "submitScore", {
+  value: () => {
+    console.warn("get lost");
+    return Promise.resolve();
+  },
+  writable: false,
+  configurable: false
+});
+
+Object.defineProperty(window, "submitLeaderboardScore", {
   value: () => {
     console.warn("get lost");
     return Promise.resolve();
