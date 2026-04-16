@@ -159,10 +159,8 @@ function createSubmissionPayload(score) {
 
 // Supabase config for global leaderboard.
 // Fill these from Supabase dashboard -> Project Settings -> API.
-// IMPORTANT: Replace SUPABASE_ANON_KEY with the actual "anon public" key from your Supabase dashboard.
-// It should start with "eyJ" and be very long (JWT token format).
 const SUPABASE_URL = "https://sdaajuoywdbxwqfmvlqg.supabase.co";
-const SUPABASE_ANON_KEY = "YOUR_ANON_KEY_HERE";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNkYWFqdW95d2RieHdxZm12bHFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzNDk3ODEsImV4cCI6MjA5MTkyNTc4MX0.Y76uNEzWf1Exz4EMKKkOXj-BaWGEnekCieDvM9X4h5I";
 
 let supabaseClient = null;
 let playerName = localStorage.getItem("yaleRunnerPlayerName") || "";
