@@ -1218,7 +1218,7 @@ function drawUI() {
     const alpha = Math.max(0, 1 - progress * 0.9);
     const scale = 1 + Math.sin(progress * Math.PI) * 0.08;
     const centerX = canvas.width / 2;
-    const centerY = canvas.height * 0.24;
+    const centerY = canvas.height * 0.5;
 
     ctx.save();
     ctx.translate(centerX, centerY);
