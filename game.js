@@ -627,6 +627,17 @@ function update(dt) {
       dog.y = 34;
       dog.vy = Math.max(0, dog.vy);
     }
+  } else if (state.shieldTimer > 0) {
+    // Shield allows flying (like fly power but more controlled)
+    dog.vy += 920 * dt;
+    const dogRoadY = getRoadYAtX(dog.x + dog.width * 0.5);
+    if (dog.y > dogRoadY - 130) {
+      dog.vy -= 1500 * dt;
+    }
+    if (dog.y < 34) {
+      dog.y = 34;
+      dog.vy = Math.max(0, dog.vy);
+    }
   } else {
     dog.vy += dog.gravity * dt;
   }
@@ -1226,36 +1237,58 @@ function drawDog() {
   const y = dog.y;
   const baseY = y - 11;
 
-  // Shield visual if active
+  // Shield visual if active (GOLDEN shield)
   if (state.shieldTimer > 0) {
     const shieldPulse = Math.sin(state.time * 8) * 0.15 + 0.85;
     const shieldRadius = 42;
     const centerX = x + dog.width / 2;
     const centerY = y + dog.height / 2;
     
-    // Rainbow shield glow
-    const gradient = ctx.createRadialGradient(centerX, centerY, shieldRadius - 10, centerX, centerY, shieldRadius);
-    gradient.addColorStop(0, "rgba(255, 105, 180, 0)");
-    gradient.addColorStop(0.7, `rgba(135, 206, 250, ${0.3 * shieldPulse})`);
-    gradient.addColorStop(1, `rgba(255, 215, 0, ${0.5 * shieldPulse})`);
+    // Golden shield glow (bright gold gradient)
+    const gradient = ctx.createRadialGradient(centerX, centerY, shieldRadius - 15, centerX, centerY, shieldRadius);
+    gradient.addColorStop(0, "rgba(255, 223, 0, 0.1)");
+    gradient.addColorStop(0.5, `rgba(255, 215, 0, ${0.5 * shieldPulse})`);
+    gradient.addColorStop(0.8, `rgba(255, 185, 0, ${0.6 * shieldPulse})`);
+    gradient.addColorStop(1, `rgba(255, 140, 0, ${0.4 * shieldPulse})`);
     ctx.fillStyle = gradient;
     ctx.beginPath();
     ctx.arc(centerX, centerY, shieldRadius * shieldPulse, 0, Math.PI * 2);
     ctx.fill();
     
-    // Shield border
-    ctx.strokeStyle = `rgba(255, 215, 0, ${0.8 * shieldPulse})`;
-    ctx.lineWidth = 3;
+    // Bright golden shield border (multiple layers for glow effect)
+    ctx.strokeStyle = `rgba(255, 215, 0, ${0.9 * shieldPulse})`;
+    ctx.lineWidth = 4;
     ctx.beginPath();
     ctx.arc(centerX, centerY, shieldRadius * shieldPulse, 0, Math.PI * 2);
     ctx.stroke();
     
-    // Sparkles
-    for (let i = 0; i < 6; i++) {
-      const angle = (state.time * 2 + i * Math.PI / 3);
-      const sx = centerX + Math.cos(angle) * (shieldRadius + 5);
-      const sy = centerY + Math.sin(angle) * (shieldRadius + 5);
-      ctx.fillStyle = "#fff";
+    ctx.strokeStyle = `rgba(255, 255, 100, ${0.6 * shieldPulse})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, (shieldRadius + 3) * shieldPulse, 0, Math.PI * 2);
+    ctx.stroke();
+    
+    // Golden sparkles (bigger and brighter)
+    for (let i = 0; i < 8; i++) {
+      const angle = (state.time * 2 + i * Math.PI / 4);
+      const sx = centerX + Math.cos(angle) * (shieldRadius + 8);
+      const sy = centerY + Math.sin(angle) * (shieldRadius + 8);
+      ctx.fillStyle = "#ffff00";
+      ctx.shadowColor = "#ffd700";
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    
+    // Inner golden shimmer particles
+    for (let i = 0; i < 4; i++) {
+      const angle = (state.time * -3 + i * Math.PI / 2);
+      const radius = 20 + Math.sin(state.time * 4 + i) * 8;
+      const sx = centerX + Math.cos(angle) * radius;
+      const sy = centerY + Math.sin(angle) * radius;
+      ctx.fillStyle = `rgba(255, 255, 200, ${0.8 * shieldPulse})`;
       ctx.beginPath();
       ctx.arc(sx, sy, 2, 0, Math.PI * 2);
       ctx.fill();
@@ -1430,68 +1463,94 @@ function drawUnicorns() {
     const x = unicorn.x;
     const y = unicorn.y + Math.sin(unicorn.bounce) * 4;
     
-    // Unicorn body (white/rainbow)
+    // Emoji-style unicorn face (like 🦄)
+    // White circular face
     ctx.fillStyle = "#fff";
     ctx.beginPath();
-    ctx.ellipse(x + 25, y + 28, 18, 14, 0, 0, Math.PI * 2);
+    ctx.arc(x + 25, y + 25, 22, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = "#ddd";
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "#e0e0e0";
+    ctx.lineWidth = 2;
     ctx.stroke();
     
-    // Head
-    ctx.fillStyle = "#fff";
-    ctx.beginPath();
-    ctx.ellipse(x + 38, y + 20, 10, 12, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    
-    // Horn (golden with rainbow sparkle)
+    // Golden spiral horn with ridges (emoji style)
     ctx.fillStyle = "#ffd700";
+    ctx.strokeStyle = "#d4a125";
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(x + 40, y + 8);
-    ctx.lineTo(x + 37, y + 18);
-    ctx.lineTo(x + 43, y + 18);
+    ctx.moveTo(x + 25, y + 5);
+    ctx.lineTo(x + 22, y + 18);
+    ctx.lineTo(x + 28, y + 18);
     ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = "#d4a125";
-    ctx.lineWidth = 1;
     ctx.stroke();
     
-    // Sparkles around horn
-    const sparkleColors = ["#ff69b4", "#87ceeb", "#ffd700", "#9370db"];
-    for (let i = 0; i < 4; i++) {
-      const angle = (unicorn.bounce + i * Math.PI / 2) * 2;
-      const sx = x + 40 + Math.cos(angle) * 12;
-      const sy = y + 12 + Math.sin(angle) * 12;
+    // Horn ridges (spiral effect)
+    ctx.strokeStyle = "#ffed4e";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x + 23, y + 12);
+    ctx.lineTo(x + 27, y + 12);
+    ctx.moveTo(x + 23.5, y + 15);
+    ctx.lineTo(x + 26.5, y + 15);
+    ctx.stroke();
+    
+    // Rainbow sparkles around horn (bigger, more vibrant)
+    const sparkleColors = ["#ff0080", "#ffd700", "#00d4ff", "#ff69b4", "#9370db"];
+    for (let i = 0; i < 5; i++) {
+      const angle = (unicorn.bounce + i * Math.PI * 2 / 5) * 1.5;
+      const radius = 18 + Math.sin(unicorn.bounce * 2 + i) * 3;
+      const sx = x + 25 + Math.cos(angle) * radius;
+      const sy = y + 10 + Math.sin(angle) * radius;
       ctx.fillStyle = sparkleColors[i];
+      ctx.shadowColor = sparkleColors[i];
+      ctx.shadowBlur = 6;
       ctx.beginPath();
-      ctx.arc(sx, sy, 2, 0, Math.PI * 2);
+      ctx.arc(sx, sy, 3, 0, Math.PI * 2);
       ctx.fill();
+      ctx.shadowBlur = 0;
     }
     
-    // Eye
+    // Eyes (cute emoji style)
     ctx.fillStyle = "#333";
     ctx.beginPath();
-    ctx.arc(x + 42, y + 20, 2, 0, Math.PI * 2);
+    ctx.arc(x + 18, y + 23, 3, 0, Math.PI * 2);
+    ctx.arc(x + 32, y + 23, 3, 0, Math.PI * 2);
     ctx.fill();
     
-    // Legs
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 3;
+    // Eye highlights
+    ctx.fillStyle = "#fff";
     ctx.beginPath();
-    ctx.moveTo(x + 18, y + 38);
-    ctx.lineTo(x + 18, y + 44);
-    ctx.moveTo(x + 32, y + 38);
-    ctx.lineTo(x + 32, y + 44);
+    ctx.arc(x + 19, y + 22, 1.2, 0, Math.PI * 2);
+    ctx.arc(x + 33, y + 22, 1.2, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Nose
+    ctx.fillStyle = "#ffb6d9";
+    ctx.beginPath();
+    ctx.ellipse(x + 25, y + 30, 4, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Nostrils
+    ctx.fillStyle = "#ff8cc5";
+    ctx.beginPath();
+    ctx.arc(x + 23, y + 30, 1, 0, Math.PI * 2);
+    ctx.arc(x + 27, y + 30, 1, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Happy smile
+    ctx.strokeStyle = "#333";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x + 25, y + 30, 6, 0.2, Math.PI - 0.2);
     ctx.stroke();
     
-    // Rainbow mane
-    const maneColors = ["#ff69b4", "#ffd700", "#87ceeb"];
-    for (let i = 0; i < 3; i++) {
+    // Rainbow mane (emoji style - colorful arcs)
+    const maneColors = ["#ff0080", "#ff69b4", "#ffd700", "#00d4ff", "#9370db"];
+    for (let i = 0; i < 5; i++) {
       ctx.fillStyle = maneColors[i];
       ctx.beginPath();
-      ctx.arc(x + 35 - i * 3, y + 14 + i * 2, 4, 0, Math.PI * 2);
+      ctx.arc(x + 8 + i * 4, y + 18 + Math.sin(unicorn.bounce + i) * 2, 5, 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -1733,9 +1792,12 @@ function drawUI() {
 
   if (state.shieldTimer > 0 && !state.gameOver) {
     ctx.textAlign = "left";
-    ctx.fillStyle = "#ff69b4";
+    ctx.fillStyle = "#ffd700";
     ctx.font = "bold 20px Arial";
-    ctx.fillText(`SHIELD ${state.shieldTimer.toFixed(1)}s`, 20, state.flyTimer > 0 ? 58 : 34);
+    ctx.strokeStyle = "#ff8c00";
+    ctx.lineWidth = 3;
+    ctx.strokeText(`✨ SHIELD ${state.shieldTimer.toFixed(1)}s`, 20, state.flyTimer > 0 ? 58 : 34);
+    ctx.fillText(`✨ SHIELD ${state.shieldTimer.toFixed(1)}s`, 20, state.flyTimer > 0 ? 58 : 34);
   }
 
   if (state.graceTimer > 0 && !state.gameOver) {
